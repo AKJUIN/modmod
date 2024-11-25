@@ -1,38 +1,75 @@
 import streamlit as st
-import pandas as pd
 from docx import Document
-import os
+import pandas as pd
 
-def extract_moderation_data(file):
+def extract_data_from_docx(file):
+    # Define the headers to extract from both paragraphs and tables
+    key_headers = [
+        "Year/ semester",
+        "Module code and name",
+        "Module coordinator name",
+        "Lead moderator name"
+    ]
+    
+    # Load the document
     doc = Document(file)
-    content = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-    module_code = extract_field(content, "Module code and name")
-    module_name = extract_field(content, "Module coordinator name")
-    problem_identified = "Y" if "Problem identified?" in content and "yes" in content.lower() else "N"
-    problem_details = extract_field(content, "Details on problems identified during assessment moderation")
-    actions_taken = extract_field(content, "Action taken")
-    return {
-        "Module Code": module_code,
-        "Module Name": module_name,
-        "Problem Identified": problem_identified,
-        "Problem Details": problem_details,
-        "Actions Taken": actions_taken
-    }
+    
+    # Initialize a dictionary to store extracted key data
+    key_data = {header: None for header in key_headers}
+    table_data = []
 
-def extract_field(content, field_name):
-    start = content.lower().find(field_name.lower())
-    if start == -1:
-        return None
-    start += len(field_name)
-    end = content[start:].find("\n")
-    return content[start:start+end].strip() if end != -1 else content[start:].strip()
+    # Extract key data from paragraphs or tables
+    for table in doc.tables:
+        rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+        
+        # Extract paragraph-like data from table rows
+        for row in rows:
+            for header in key_headers:
+                if header.lower() in row[0].lower():
+                    key_data[header] = row[1] if len(row) > 1 else None
 
-st.title("Moderation Data Extraction Tool")
-uploaded_files = st.file_uploader("Upload Word Documents", accept_multiple_files=True, type=["docx"])
+        # Locate the specific table containing the required headers
+        for i, row in enumerate(rows):
+            if (
+                len(row) >= 4 and
+                "module component" in row[0].lower() and
+                "moderator name" in row[1].lower() and
+                "problem identified?" in row[2].lower() and
+                "problem addressed?" in row[3].lower()
+            ):
+                # Extract data from rows below the header
+                for data_row in rows[i + 1:]:
+                    if len(data_row) >= 4 and data_row[0]:  # Ensure the row has valid data
+                        # Validate that the Module component field is relevant
+                        if data_row[0].startswith("321"):
+                            table_data.append({
+                                "Year/ semester": key_data["Year/ semester"],
+                                "Module code and name": key_data["Module code and name"],
+                                "Module coordinator name": key_data["Module coordinator name"],
+                                "Lead moderator name": key_data["Lead moderator name"],
+                                "Module component": data_row[0],
+                                "Moderator name": data_row[1],
+                                "Problem identified?": data_row[2],
+                                "Problem addressed?": data_row[3],
+                            })
+                break  # Stop searching once the relevant table is processed
 
-if st.button("Process Files"):
-    if uploaded_files:
-        data = [extract_moderation_data(file) for file in uploaded_files]
-        df = pd.DataFrame(data)
-        st.write(df)
-        st.download_button("Download Data as Excel", df.to_excel(index=False), "Moderation_Data.xlsx")
+    return table_data
+
+# Streamlit UI
+st.title("Extract Information from Word Document")
+
+# Upload the Word document
+uploaded_file = st.file_uploader("Upload a Word Document (.docx)", type="docx")
+
+if uploaded_file:
+    # Extract data
+    combined_data = extract_data_from_docx(uploaded_file)
+    
+    # Display results
+    if combined_data:
+        st.subheader("Extracted Data")
+        df = pd.DataFrame(combined_data)  # Convert combined data to a DataFrame
+        st.table(df)  # Display the table in Streamlit
+    else:
+        st.write("No relevant data found.")
