@@ -1,103 +1,80 @@
-import streamlit as st
+import os
 import pandas as pd
 from docx import Document
-import io
-from openpyxl import Workbook
-from openpyxl.styles import Alignment
 
-# Function: Extract data from a Word document
-def extract_data_from_docx(file):
+def extract_moderation_data(file_path):
     """
-    Extracts module name, code, and problems identified along with actions taken from a Word document.
+    Extracts moderation data from a Word document.
     
-    :param file: File-like object representing the .docx file.
-    :return: List of dictionaries containing extracted data.
+    Args:
+        file_path (str): Path to the Word document.
+
+    Returns:
+        dict: A dictionary containing extracted data.
     """
-    # Load the document
-    doc = Document(file)
+    # Open the document
+    doc = Document(file_path)
+    content = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
 
-    # Initialize variables
-    module_code = None
-    module_name = None
-    extracted_data = []
+    # Extract key information (module code, name, problem, details, actions)
+    module_code = extract_field(content, "Module code and name")
+    module_name = extract_field(content, "Module coordinator name")
+    problem_identified = "Y" if "Problem identified?" in content and "yes" in content.lower() else "N"
+    problem_details = extract_field(content, "Details on problems identified during assessment moderation")
+    actions_taken = extract_field(content, "Action taken")
+    
+    return {
+        "Module Code": module_code,
+        "Module Name": module_name,
+        "Problem Identified": problem_identified,
+        "Problem Details": problem_details,
+        "Actions Taken": actions_taken
+    }
 
-    # Extract text from tables
-    for table in doc.tables:
-        for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
-            
-            # Find Module Code and Name
-            if len(cells) > 1 and "module code and name" in cells[0].lower():
-                module_code = cells[1].split(" ")[0]  # Extract module code
-                module_name = " ".join(cells[1].split(" ")[1:])  # Extract module name
-
-            # Check for "Problem Identified" and "Action Taken"
-            if len(cells) > 2 and "problem identified" in cells[0].lower():
-                problem_text = cells[1] if "yes" in cells[1].lower() else None
-                action_text = cells[2] if cells[2] else None
-                
-                # Add to extracted data if a problem was identified
-                if problem_text and action_text:
-                    extracted_data.append({
-                        "Module Code": module_code,
-                        "Module Name": module_name,
-                        "Problem Identified": problem_text,
-                        "Action Taken": action_text
-                    })
-
-    return extracted_data
-
-# Function: Save data to Excel
-def save_data_to_excel(df):
+def extract_field(content, field_name):
     """
-    Save extracted data to an Excel file with basic formatting.
+    Extracts a specific field's value from the document content.
+
+    Args:
+        content (str): Text content of the document.
+        field_name (str): Name of the field to extract.
+
+    Returns:
+        str: Extracted value or None if not found.
     """
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Extracted Data")
-        worksheet = writer.sheets["Extracted Data"]
+    try:
+        start = content.lower().find(field_name.lower())
+        if start == -1:
+            return None
+        start += len(field_name)
+        end = content[start:].find("\n")
+        return content[start:start+end].strip() if end != -1 else content[start:].strip()
+    except Exception:
+        return None
 
-        # Format columns and rows
-        for col in worksheet.columns:
-            max_length = max(len(str(cell.value or "")) for cell in col)
-            col_letter = col[0].column_letter
-            worksheet.column_dimensions[col_letter].width = max(max_length + 2, 10)
+def analyze_files(folder_path):
+    """
+    Analyzes all Word documents in a folder and extracts moderation data.
 
-        for row in worksheet.iter_rows():
-            for cell in row:
-                cell.alignment = Alignment(wrap_text=True)
-    return output.getvalue()
+    Args:
+        folder_path (str): Path to the folder containing Word documents.
 
-# Streamlit App
-st.title("Document Data Extractor")
+    Returns:
+        pd.DataFrame: DataFrame containing the extracted data.
+    """
+    data = []
+    for file_name in os.listdir(folder_path):
+        if file_name.endswith(".docx"):
+            file_path = os.path.join(folder_path, file_name)
+            extracted_data = extract_moderation_data(file_path)
+            data.append(extracted_data)
+    return pd.DataFrame(data)
 
-# Sidebar Navigation
-menu = st.sidebar.radio("Navigation", ["Extract Data"])
+# Example usage
+folder_path = "/path/to/folder/with/word/documents"
+moderation_data = analyze_files(folder_path)
 
-if menu == "Extract Data":
-    st.header("Extract Data from Documents")
-    uploaded_files = st.file_uploader("Upload .docx files", type=["docx"], accept_multiple_files=True)
-
-    if uploaded_files:
-        extracted_data = []
-        for file in uploaded_files:
-            extracted_data.extend(extract_data_from_docx(file))
-
-        if extracted_data:
-            # Convert to DataFrame
-            df = pd.DataFrame(extracted_data)
-            
-            # Display DataFrame
-            st.write("### Extracted Data")
-            st.dataframe(df)
-
-            # Allow download of extracted data
-            excel_data = save_data_to_excel(df)
-            st.download_button(
-                label="Download Extracted Data as Excel",
-                data=excel_data,
-                file_name="extracted_data.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.warning("No data extracted. Please check the uploaded documents.")
+# Save to an Excel file
+output_file = "/path/to/save/Moderation_Data.xlsx"
+moderation_data.to_excel(output_file, index=False)
+print(f"Data saved to {output_file}")
