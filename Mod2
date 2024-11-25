@@ -1,28 +1,16 @@
-import os
+import streamlit as st
 import pandas as pd
 from docx import Document
+import os
 
-def extract_moderation_data(file_path):
-    """
-    Extracts moderation data from a Word document.
-    
-    Args:
-        file_path (str): Path to the Word document.
-
-    Returns:
-        dict: A dictionary containing extracted data.
-    """
-    # Open the document
-    doc = Document(file_path)
+def extract_moderation_data(file):
+    doc = Document(file)
     content = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-
-    # Extract key information (module code, name, problem, details, actions)
     module_code = extract_field(content, "Module code and name")
     module_name = extract_field(content, "Module coordinator name")
     problem_identified = "Y" if "Problem identified?" in content and "yes" in content.lower() else "N"
     problem_details = extract_field(content, "Details on problems identified during assessment moderation")
     actions_taken = extract_field(content, "Action taken")
-    
     return {
         "Module Code": module_code,
         "Module Name": module_name,
@@ -32,49 +20,19 @@ def extract_moderation_data(file_path):
     }
 
 def extract_field(content, field_name):
-    """
-    Extracts a specific field's value from the document content.
-
-    Args:
-        content (str): Text content of the document.
-        field_name (str): Name of the field to extract.
-
-    Returns:
-        str: Extracted value or None if not found.
-    """
-    try:
-        start = content.lower().find(field_name.lower())
-        if start == -1:
-            return None
-        start += len(field_name)
-        end = content[start:].find("\n")
-        return content[start:start+end].strip() if end != -1 else content[start:].strip()
-    except Exception:
+    start = content.lower().find(field_name.lower())
+    if start == -1:
         return None
+    start += len(field_name)
+    end = content[start:].find("\n")
+    return content[start:start+end].strip() if end != -1 else content[start:].strip()
 
-def analyze_files(folder_path):
-    """
-    Analyzes all Word documents in a folder and extracts moderation data.
+st.title("Moderation Data Extraction Tool")
+uploaded_files = st.file_uploader("Upload Word Documents", accept_multiple_files=True, type=["docx"])
 
-    Args:
-        folder_path (str): Path to the folder containing Word documents.
-
-    Returns:
-        pd.DataFrame: DataFrame containing the extracted data.
-    """
-    data = []
-    for file_name in os.listdir(folder_path):
-        if file_name.endswith(".docx"):
-            file_path = os.path.join(folder_path, file_name)
-            extracted_data = extract_moderation_data(file_path)
-            data.append(extracted_data)
-    return pd.DataFrame(data)
-
-# Example usage
-folder_path = "/path/to/folder/with/word/documents"
-moderation_data = analyze_files(folder_path)
-
-# Save to an Excel file
-output_file = "/path/to/save/Moderation_Data.xlsx"
-moderation_data.to_excel(output_file, index=False)
-print(f"Data saved to {output_file}")
+if st.button("Process Files"):
+    if uploaded_files:
+        data = [extract_moderation_data(file) for file in uploaded_files]
+        df = pd.DataFrame(data)
+        st.write(df)
+        st.download_button("Download Data as Excel", df.to_excel(index=False), "Moderation_Data.xlsx")
